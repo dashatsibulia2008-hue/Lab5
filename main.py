@@ -1,86 +1,73 @@
-import requests
 import numpy as np
 import matplotlib.pyplot as plt
+import requests
 
-def get_data():
-    coords = "48.164214,24.536044|48.164983,24.534836|48.165605,24.534068|48.166228,24.532915|48.166777,24.531927|48.167332,24.530935|48.167825,24.530044|48.168345,24.529023|48.168874,24.527845|48.169425,24.526543|48.170012,24.525234|48.170643,24.523821|48.171245,24.522412|48.171854,24.520934|48.172456,24.519456|48.173023,24.518012|48.173645,24.516543|48.174212,24.515012|48.174854,24.513543|48.175412,24.512012|48.176043,24.510543|48.176612,24.509012|48.177245,24.507543|48.177812,24.506012|48.178454,24.504543|48.179012,24.503012"
-    url = f"https://api.open-elevation.com/api/v1/lookup?locations={coords}"
-    data = requests.get(url).json()
-    return data["results"]
+url = "https://api.open-elevation.com/api/v1/lookup?locations=48.164214,24.536044|48.164983,24.534836|48.165605,24.534068|48.166228,24.532915|48.166777,24.531927|48.167326,24.530884|48.167011,24.530061|48.166053,24.528039|48.166655,24.526064|48.164983,24.523574|48.166053,24.520214|48.165416,24.517170|48.164546,24.514640|48.163412,24.512980|48.162331,24.511715|48.162015,24.509462|48.162147,24.506932|48.161751,24.504244|48.161197,24.501793|48.160580,24.500537|48.160250,24.500106"
+data = requests.get(url).json()["results"]
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371000
-    phi1, phi2 = np.radians(lat1), np.radians(lat2)
-    dphi, dlam = np.radians(lat2 - lat1), np.radians(lon2 - lon1)
-    a = np.sin(dphi / 2) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlam / 2) ** 2
-    return 2 * R * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    p1, p2 = np.radians(lat1), np.radians(lat2)
+    dp, dl = np.radians(lat2-lat1), np.radians(lon2-lon1)
+    a = np.sin(dp/2)**2 + np.cos(p1)*np.cos(p2)*np.sin(dl/2)**2
+    return 2 * R * np.arcsin(np.sqrt(a))
 
-def solve_progonka(x, y):
+elevs = [p['elevation'] for p in data]
+lats, lons = [p['latitude'] for p in data], [p['longitude'] for p in data]
+dist = [0]
+for i in range(1, len(data)):
+    dist.append(dist[-1] + haversine(lats[i-1], lons[i-1], lats[i], lons[i]))
+
+X_f, Y_f = np.array(dist), np.array(elevs)
+
+def solve_spline(x, y):
     n = len(x)
     h = np.diff(x)
-    A, B, C, D = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
-    for i in range(1, n - 1):
-        A[i] = h[i - 1]
-        B[i] = 2 * (h[i - 1] + h[i])
-        C[i] = h[i]
-        D[i] = 3 * ((y[i + 1] - y[i]) / h[i] - (y[i] - y[i - 1]) / h[i - 1])
-    alpha, beta = np.zeros(n), np.zeros(n)
-    for i in range(1, n - 1):
-        m = A[i] * alpha[i - 1] + B[i]
-        alpha[i] = -C[i] / m
-        beta[i] = (D[i] - A[i] * beta[i - 1]) / m
-    c = np.zeros(n)
-    for i in range(n - 2, 0, -1):
-        c[i] = alpha[i] * c[i + 1] + beta[i]
+    A, B = np.zeros((n, n)), np.zeros(n)
+    A[0, 0], A[-1, -1] = 1, 1
+    for i in range(1, n-1):
+        A[i, i-1], A[i, i], A[i, i+1] = h[i-1], 2*(h[i-1]+h[i]), h[i]
+        B[i] = 3*((y[i+1]-y[i])/h[i] - (y[i]-y[i-1])/h[i-1])
+    c = np.linalg.solve(A, B)
     a = y[:-1]
-    b, d = np.zeros(n - 1), np.zeros(n - 1)
-    for i in range(n - 1):
-        b[i] = (y[i + 1] - y[i]) / h[i] - h[i] * (c[i + 1] + 2 * c[i]) / 3
-        d[i] = (c[i + 1] - c[i]) / (3 * h[i])
+    b = (y[1:]-y[:-1])/h - h*(c[1:]+2*c[:-1])/3
+    d = (c[1:]-c[:-1])/(3*h)
     return a, b, c[:-1], d
 
-results = get_data()
-lats = [p['latitude'] for p in results]
-lons = [p['longitude'] for p in results]
-elevs = [p['elevation'] for p in results]
-dist = [0]
-for i in range(1, len(results)):
-    dist.append(dist[-1] + haversine(lats[i - 1], lons[i - 1], lats[i], lons[i]))
+def eval_spline(xk, xq, a, b, c, d):
+    idx = np.clip(np.searchsorted(xk, xq)-1, 0, len(a)-1)
+    dx = xq - xk[idx]
+    return a[idx] + b[idx]*dx + c[idx]*dx**2 + d[idx]*dx**3
 
-x, y = np.array(dist), np.array(elevs)
-a, b, c, d = solve_progonka(x, y)
+# Графік 1: Точки з'єднані лініями (лінійна інтерполяція)
+plt.figure(figsize=(10, 5))
+plt.plot(X_f, Y_f, 'ro-', label='Лінійна інтерполяція (з\'єднані точки)')
+plt.title('Графік 1: Вхідні дані (з\'єднані точки)')
+plt.xlabel('Відстань (м)'); plt.ylabel('Висота (м)')
+plt.legend(); plt.grid(True)
+plt.show()
 
-total_dist = x[-1]
-total_ascent = sum(max(0, y[i] - y[i - 1]) for i in range(1, len(y)))
-total_descent = sum(max(0, y[i-1] - y[i]) for i in range(1, len(y)))
-energy = 80 * 9.81 * total_ascent
+# Графік 2: З'єднані точки + плавний кубічний сплайн
+plt.figure(figsize=(10, 5))
+sa, sb, sc, sd = solve_spline(X_f, Y_f)
+xs = np.linspace(X_f[0], X_f[-1], 500)
+ys = eval_spline(X_f, xs, sa, sb, sc, sd)
+plt.plot(X_f, Y_f, 'ro--', alpha=0.4, label='Вхідна ламана')
+plt.plot(xs, ys, 'b-', linewidth=2, label='Кубічний сплайн (плавна крива)')
+plt.title('Графік 2: Порівняння ламаної та кубічного сплайна')
+plt.legend(); plt.grid(True)
+plt.show()
 
-grad_full = np.gradient(y, x) * 100
-max_grad = np.max(grad_full)
-min_grad = np.min(grad_full)
-avg_grad = np.mean(np.abs(grad_full))
-steep_sections = np.sum(np.abs(grad_full) > 15)
-
-print(f"Загальна довжина: {total_dist:.2f} м")
-print(f"Загальний підйом: {total_ascent:.2f} м")
-print(f"Загальний спуск: {total_descent:.2f} м")
-print(f"Максимальний підйом (%): {max_grad:.2f}")
-print(f"Максимальний спуск (%): {min_grad:.2f}")
-print(f"Середній градієнт (%): {avg_grad:.2f}")
-print(f"Ділянки з крутизною > 15%: {steep_sections}")
-print(f"Механічна робота: {energy:.2f} Дж")
-print(f"Енергія: {energy / 1000:.2f} кДж")
-print(f"Енергія (ккал): {energy / 4184:.2f}")
-
+# Графік 3: Порівняння вузлів 10, 15, 20
 plt.figure(figsize=(10, 6))
-plt.plot(x, y, 'ro', label='Точки GPS')
-for i in range(len(x) - 1):
-    xs = np.linspace(x[i], x[i + 1], 10)
-    ys = a[i] + b[i] * (xs - x[i]) + c[i] * (xs - x[i]) ** 2 + d[i] * (xs - x[i]) ** 3
-    plt.plot(xs, ys, 'b-')
-plt.title('Профіль маршруту: Заросляк - Говерла')
-plt.xlabel('Відстань (м)')
-plt.ylabel('Висота (м)')
-plt.grid(True)
-plt.legend()
+for n in [10, 15, 20]:
+    idx = np.linspace(0, len(X_f)-1, n, dtype=int)
+    xk, yk = X_f[idx], Y_f[idx]
+    sa, sb, sc, sd = solve_spline(xk, yk)
+    ys_n = eval_spline(xk, xs, sa, sb, sc, sd)
+    plt.plot(xs, ys_n, label=f'Сплайн ({n} вузлів)')
+
+plt.plot(X_f, Y_f, 'k.', alpha=0.3, label='Точки GPS')
+plt.title('Графік 3: Вплив кількості вузлів на гладкість')
+plt.legend(); plt.grid(True)
 plt.show()
