@@ -10,7 +10,7 @@ def load_from_file(filename):
     return np.loadtxt(filename)
 
 
-# 2. LU-розклад (Алгоритм з методички)
+# 2. LU-розклад 
 def lu_decomposition(A):
     n = len(A)
     L = np.zeros((n, n))
@@ -40,9 +40,9 @@ def solve_lu(L, U, b):
 
 
 # --- ОСНОВНА ЧАСТИНА ПРОГРАМИ ---
-n = 10  # Для тесту візьмемо 10, у звіті можна поставити 100
+n = 10  
 
-# Геренація матриці (щоб була стійка, додамо значення на діагональ)
+# Геренація матриці 
 A_gen = np.random.rand(n, n) + np.eye(n) * n
 x_exact = np.full(n, 2.5)  # Заданий розв'язок за умовою
 b_gen = np.dot(A_gen, x_exact)
